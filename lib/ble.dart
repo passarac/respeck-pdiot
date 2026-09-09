@@ -351,22 +351,33 @@ Future<void> connectToRespeck() async {
       // Require a fresh packet before a new recording can be started
       ui.received_packet = false;
 
+      // Without autoConnect the platform does not re-establish the link on
+      // its own, so say what actually has to happen rather than promising a
+      // reconnect that will never arrive
       if (respeck?.disconnectReason?.code != null &&
           respeck?.disconnectReason?.code != 0) {
-        showLongToast("Waiting for reconnect...");
+        showLongToast("Respeck disconnected - press Connect to reconnect");
       }
     }
   });
 
-  // Now connect to the respeck
-  // enable auto connect
+  // Now connect to the respeck.
+  //  - autoConnect is deliberately false. With autoConnect the platform only
+  //    queues a background connection and connect() returns straight away,
+  //    typically before the sensor is reachable at all - and we have just
+  //    stopped the scan, so on Android nothing happens until the respeck
+  //    advertises again. That is what made the first press of Connect look
+  //    like it did nothing while a second press worked.
+  //  - awaiting a direct connection instead means this call returns only once
+  //    the respeck is actually connected, or throws if it cannot be reached,
+  //    so the caller's "connecting" guard covers the whole attempt and a
+  //    failure reaches its catch block.
   //  - note: autoConnect is incompatible with mtu argument, so you must call requestMtu yourself
   await respeck!
-      .connect(license: License.nonprofit, autoConnect: true, mtu: null);
+      .connect(license: License.nonprofit, autoConnect: false, mtu: null);
 
-// wait until connection
-//  - when using autoConnect, connect() always returns immediately, so we must
-//    explicity listen to `device.connectionState` to know when connection occurs
+  // The connectionState listener above receives the connected event and calls
+  // notify() from there, so there is nothing more to do here.
 }
 
 Future<void> disconnect() async {
