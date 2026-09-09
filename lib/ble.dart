@@ -351,10 +351,23 @@ Future<void> connectToRespeck() async {
       // Require a fresh packet before a new recording can be started
       ui.received_packet = false;
 
+      // A disconnect in the middle of a recording used to leave `recording`
+      // true and the CSV sink open. No further samples arrive, the elapsed
+      // counter stays frozen at the value from the last packet and the file
+      // is never closed, so the recording truncated without saying so. Close
+      // it properly and tell the user instead.
+      final bool wasRecording = ui.recording;
+      if (wasRecording) {
+        await ui.stopRecording(
+            message: "Respeck disconnected - recording stopped");
+      }
+
       // Without autoConnect the platform does not re-establish the link on
       // its own, so say what actually has to happen rather than promising a
-      // reconnect that will never arrive
-      if (respeck?.disconnectReason?.code != null &&
+      // reconnect that will never arrive. A stopped recording has already
+      // reported the disconnect, so it is not announced twice.
+      if (!wasRecording &&
+          respeck?.disconnectReason?.code != null &&
           respeck?.disconnectReason?.code != 0) {
         showLongToast("Respeck disconnected - press Connect to reconnect");
       }

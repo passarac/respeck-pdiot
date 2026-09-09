@@ -171,7 +171,10 @@ class MyHomePageState extends State<MyHomePage> {
             ),
             const SizedBox(height: 10),
             ElevatedButton(
-                onPressed: stopRecording,
+                // Called through a closure because stopRecording now takes an
+                // optional argument, and onPressed wants a plain no-argument
+                // callback
+                onPressed: () => stopRecording(),
                 style:
                     ElevatedButton.styleFrom(backgroundColor: Colors.red[200]!),
                 child: const Text('Stop recording')),
@@ -294,8 +297,10 @@ class MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  // Stop recording and close the CSV file
-  void stopRecording() async {
+  // Stop recording and close the CSV file. `message` lets a caller that is
+  // stopping the recording for its own reason - a disconnect, say - explain
+  // why, instead of the plain "Recording stopped" of the Stop button.
+  Future<void> stopRecording({String message = "Recording stopped"}) async {
     if (!recording) {
       return;
     }
@@ -321,6 +326,6 @@ class MyHomePageState extends State<MyHomePage> {
       print("Error closing CSV file: $e");
     }
 
-    showToast("Recording stopped");
+    showToast(message);
   }
 }
