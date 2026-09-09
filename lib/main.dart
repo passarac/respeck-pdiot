@@ -10,11 +10,17 @@ import 'home.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Read app version information
-  PackageInfo.fromPlatform().then((PackageInfo packageInfo) {
+  // Read app version information. This must be awaited, otherwise the settings
+  // page can be built before the real version has arrived and will show the
+  // "0.0.0" default instead.
+  try {
+    final PackageInfo packageInfo = await PackageInfo.fromPlatform();
     appVersionName = packageInfo.version; // App version
-    appVersionCode = int.parse(packageInfo.buildNumber); // Build number
-  });
+    appVersionCode = int.tryParse(packageInfo.buildNumber) ?? 0; // Build number
+  } catch (e) {
+    // A missing version is not worth blocking startup for
+    print("Could not read package info: $e");
+  }
 
   // Read pairing information form shared preferences
   respeckUUID = await asyncPrefs.getString('rid');
@@ -24,11 +30,27 @@ void main() async {
   print("subjectID:${subjectID}");
 
   // get storage folder - must be accessible to the user for PDIoT
-  if (Platform.isAndroid) {
-    storageFolder = await getDownloadsDirectory();
-  } else {
-    storageFolder = await getApplicationDocumentsDirectory();
+  try {
+    if (Platform.isAndroid) {
+      storageFolder = await getDownloadsDirectory();
+    } else {
+      storageFolder = await getApplicationDocumentsDirectory();
+    }
+  } catch (e) {
+    print("Could not get storage folder: $e");
   }
+
+  // Fall back to the app documents directory if the downloads folder was not
+  // available, so that recording still works (the files are just harder to
+  // reach over USB)
+  if (storageFolder == null) {
+    try {
+      storageFolder = await getApplicationDocumentsDirectory();
+    } catch (e) {
+      print("Could not get fallback storage folder: $e");
+    }
+  }
+  print("storageFolder:${storageFolder?.path}");
 
   runApp(const MyApp());
 }
@@ -42,21 +64,6 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'pdiot',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.lightBlue),
         useMaterial3: true,
       ),

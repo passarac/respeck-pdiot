@@ -1,4 +1,5 @@
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'utils.dart';
@@ -13,8 +14,21 @@ import 'globals.dart';
 
 BluetoothDevice? respeck;
 late MyHomePageState ui;
-var subscription2;
-late int respeckVersion;
+StreamSubscription<BluetoothConnectionState>? subscription2;
+
+// 0 until a supported respeck has been identified during scanning
+int respeckVersion = 0;
+
+// Packet layout: 4 byte timestamp, 2 byte sequence number, then (respeck
+// version 6 only) 1 byte battery level and 1 byte charging flag, then the
+// acceleration samples, 6 bytes each (x, y, z as big endian int16).
+const int sampleBytes = 6;
+
+// NOTE: this offset has always been 8 for both respeck versions. If version 5
+// packets turn out to omit the two battery bytes, this is the single place
+// that needs to change (to `respeckVersion == 6 ? 8 : 6`) - see the note in
+// the review, it needs checking against a v5 sensor.
+const int sampleDataOffset = 8;
 
 Future<void> scanForRespeck(MyHomePageState _ui) async {
   ui = _ui;
@@ -24,13 +38,17 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
 
   showToast("Searching for Respeck $respeckUUID...");
 
+  // Forget any device found by a previous scan, so that a failed scan cannot
+  // leave us connecting to a stale device
+  respeck = null;
+  respeckVersion = 0;
+
   var subscription = FlutterBluePlus.scanResults.listen(
     (results) {
       if (results.isNotEmpty) {
         for (ScanResult r in results) {
+          //print('${r.device.remoteId}: "${r.advertisementData.advName}" found!');
           if (Platform.isAndroid) {
-            //ScanResult r = results.last; // the most recently found device
-            //print('${r.device.remoteId}: "${r.advertisementData.advName}" found!');
             if (r.device.remoteId.str == respeckUUID) {
               if (r.advertisementData.advName == "Res6AL") {
                 respeck = r.device;
@@ -49,8 +67,8 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
               }
             }
           } else if (Platform.isIOS) {
-            //ScanResult r = results.last; // the most recently found device
-            //print('${r.device.remoteId}: "${r.advertisementData.advName}" found!');
+            // On iOS the remote id is randomised per phone, so the respeck is
+            // identified by the id advertised in its service data instead
             final serviceData =
                 r.advertisementData.serviceData; // Map<Guid, List<int>>
             final feedUuid = Guid('0000feed-0000-1000-8000-00805f9b34fb');
@@ -61,20 +79,29 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
                   .toList();
               final hex_str = hex.join(':').toUpperCase();
               //print('Found service data: GAP UUID: $hex_str');
-              if (r.advertisementData.advName == "Res6AM") {
-                if (hex_str == respeckUUID) {
+              if (hex_str == respeckUUID) {
+                if (r.advertisementData.advName == "Res6AM") {
                   respeck = r.device;
                   respeckVersion = 6;
                   fwString = "6AM";
+                } else {
+                  // Only complain about the firmware of *our* respeck, not
+                  // about every other BLE device in the room
+                  showToast("Respeck firmware is too old");
                 }
-              } else {
-                showToast("Respeck firmware is too old");
               }
             }
           }
-          FlutterBluePlus.stopScan();
-          print("STOP SCANNING");
-          break;
+
+          // Stop scanning only once our respeck has actually been found.
+          // These two statements used to sit outside the checks above, which
+          // ended the scan after looking at the first device reported,
+          // whatever it was.
+          if (respeck != null) {
+            FlutterBluePlus.stopScan();
+            print("STOP SCANNING");
+            break;
+          }
         }
       }
     },
@@ -90,13 +117,13 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
       .where((val) => val == BluetoothAdapterState.on)
       .first;
 
-  // Start scanning w/ timeout
-  // Optional: use `stopScan()` as an alternative to timeout
+  // Start scanning w/ timeout. The timeout matters: without it a scan that
+  // never finds the respeck never finishes, and the caller waits forever.
   await FlutterBluePlus.startScan(
-      //withServices: [Guid("180D")], // match any of the specified services
-      //withNames: ["Bluno"], // *or* any of the specified names
-      //timeout: const Duration(seconds: 5)
-      );
+    //withServices: [Guid("180D")], // match any of the specified services
+    //withNames: ["Bluno"], // *or* any of the specified names
+    timeout: const Duration(seconds: 15),
+  );
 
   // wait for scanning to stop
   await FlutterBluePlus.isScanning.where((val) => val == false).first;
@@ -106,6 +133,10 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
 Future<void> notify() async {
   BluetoothService? ser;
   BluetoothCharacteristic? cha;
+
+  if (respeck == null) {
+    return;
+  }
 
   // Service discovery
   // Note: You must call discoverServices after every re-connection!
@@ -135,7 +166,7 @@ Future<void> notify() async {
 
   // Subscribe to acceleration values
   if (cha != null) {
-    final subscription3 = cha.onValueReceived.listen((value) async {
+    final subscription3 = cha.onValueReceived.listen((value) {
       ui.received_packet = true;
       // onValueReceived is updated:
       //   - anytime read() is called
@@ -153,6 +184,12 @@ Future<void> notify() async {
 
       Uint8List ul = Uint8List.fromList(value);
       ByteData bd = ul.buffer.asByteData();
+
+      // A truncated packet would make the header reads below throw
+      if (bd.lengthInBytes < sampleDataOffset) {
+        print("Ignoring short packet of ${bd.lengthInBytes} bytes");
+        return;
+      }
 
       int ts = bd.getUint32(0);
       ts = (ts * 197 * 1000 / 32768)
@@ -178,11 +215,22 @@ Future<void> notify() async {
       // NOTE: The respeck sends multiple samples per packet, for efficiency
       // For each sample in this packet, append a line to the CSV file,
 
-      String csv_str = "";
+      StringBuffer csv = StringBuffer();
       int seqNumInPacket = 0;
+      int samplesWritten = 0;
       double x = 0, y = 0, z = 0;
 
-      for (int i = 8; i < bd.lengthInBytes; i += 6) {
+      // Take a single snapshot of the recording flag, so that a recording
+      // started or stopped part way through this packet cannot leave the
+      // sample count and the file contents disagreeing
+      final bool isRecording = ui.recording;
+
+      // The loop condition tests `i + sampleBytes <= length`: the old
+      // `i < length` entered the body whenever a single byte was left and
+      // then read five bytes past the end of the packet
+      for (int i = sampleDataOffset;
+          i + sampleBytes <= bd.lengthInBytes;
+          i += sampleBytes) {
         int b1 = bd.getInt8(i);
         int b2 = bd.getInt8(i + 1);
         x = combineAccelBytes(b1, b2);
@@ -193,42 +241,61 @@ Future<void> notify() async {
         int b6 = bd.getInt8(i + 5);
         z = combineAccelBytes(b5, b6);
 
-        csv_str +=
-            "${packet_received_ts.millisecondsSinceEpoch},$ts,$packetSeqNumber,$seqNumInPacket,$x,$y,$z\n";
+        if (isRecording) {
+          csv.write(
+              "${packet_received_ts.millisecondsSinceEpoch},$ts,$packetSeqNumber,$seqNumInPacket,$x,$y,$z\n");
+          samplesWritten++;
+        }
 
         seqNumInPacket++;
-        ui.recorded_samples++;
+      }
 
-        // Update the UI to show the latest data (called once per packet)
-        ui.setState(() {
-          // This call to setState tells the Flutter framework that something has
-          // changed in this State, which causes it to rerun the build method below
-          // so that the display can reflect the updated values.
+      ui.recorded_samples += samplesWritten;
+
+      // write to the CSV file. All appends go through one open sink, so they
+      // stay in order - reopening the file per packet let concurrent writes
+      // interleave
+      if (csv.isNotEmpty) {
+        try {
+          csvSink?.write(csv.toString());
+        } catch (e) {
+          print("Error writing to CSV file: $e");
+        }
+      }
+
+      // Update the UI to show the latest data. This is done once per packet:
+      // calling setState for every sample rebuilt the whole page ~25 times
+      // per packet for no benefit.
+      if (!ui.mounted) {
+        return;
+      }
+      ui.setState(() {
+        // This call to setState tells the Flutter framework that something has
+        // changed in this State, which causes it to rerun the build method
+        // so that the display can reflect the updated values.
+        if (seqNumInPacket > 0) {
           ui.accel =
               "x=${x.toStringAsFixed(3)}, y=${y.toStringAsFixed(3)}, z=${z.toStringAsFixed(3)}";
-          if (respeckVersion == 6) {
-            if (charging) {
-              ui.batt_level = "Battery: $battLevel% (charging)";
-            } else {
-              ui.batt_level = "Battery: $battLevel%";
-            }
+        }
+        if (respeckVersion == 6) {
+          if (charging) {
+            ui.batt_level = "Battery: $battLevel% (charging)";
           } else {
-            ui.batt_level = "";
+            ui.batt_level = "Battery: $battLevel%";
           }
-        });
-      }
-      // update elapsed time counter if recording
-      if (ui.recording) {
-        int elapsed_secs =
-            packet_received_ts.difference(ui.start_timestamp!).inSeconds;
+        } else {
+          ui.batt_level = "";
+        }
 
-        ui.recording_info =
-            "Written ${ui.recorded_samples} samples (${elapsed_secs} seconds)";
+        // update elapsed time counter if recording
+        if (isRecording && ui.start_timestamp != null) {
+          int elapsed_secs =
+              packet_received_ts.difference(ui.start_timestamp!).inSeconds;
 
-        // write to the CSV file
-        await csvFile?.writeAsString(csv_str,
-            mode: FileMode.writeOnlyAppend, flush: false);
-      }
+          ui.recording_info =
+              "Written ${ui.recorded_samples} samples (${elapsed_secs} seconds)";
+        }
+      });
     });
 
     // cleanup: cancel subscription when disconnected
@@ -240,10 +307,25 @@ Future<void> notify() async {
     // Note: If a characteristic supports both **notifications** and **indications**,
     // it will default to **notifications**. This matches how CoreBluetooth works on iOS.
     await cha.setNotifyValue(true);
+  } else {
+    print("Acceleration characteristic not found");
+    showLongToast("This Respeck did not offer any acceleration data");
   }
 }
 
 Future<void> connectToRespeck() async {
+  // Nothing to connect to unless a scan found the respeck. This check has to
+  // come before the first use of `respeck` below, not after it.
+  if (respeck == null) {
+    return;
+  }
+
+  // Drop any listener left over from a previous connection attempt, otherwise
+  // each press of Connect adds another listener, and every packet then gets
+  // decoded and written to the CSV once per listener
+  await subscription2?.cancel();
+  subscription2 = null;
+
   // listen for disconnection
   subscription2 =
       respeck!.connectionState.listen((BluetoothConnectionState state) async {
@@ -251,7 +333,12 @@ Future<void> connectToRespeck() async {
       print("CONNECTED to Respeck $respeckUUID");
       respeckConnected = true;
       showToast("Connected to Respeck $respeckUUID");
-      await notify();
+      try {
+        await notify();
+      } catch (e) {
+        print("Could not subscribe to acceleration data: $e");
+        showLongToast("Could not read data from the Respeck");
+      }
     }
 
     if (state == BluetoothConnectionState.disconnected) {
@@ -261,6 +348,8 @@ Future<void> connectToRespeck() async {
       print(
           "DISCONNECT: ${respeck?.disconnectReason?.code} ${respeck?.disconnectReason?.description}");
       respeckConnected = false;
+      // Require a fresh packet before a new recording can be started
+      ui.received_packet = false;
 
       if (respeck?.disconnectReason?.code != null &&
           respeck?.disconnectReason?.code != 0) {
@@ -268,19 +357,6 @@ Future<void> connectToRespeck() async {
       }
     }
   });
-  // cleanup: cancel subscription when disconnected
-  //   - [delayed] This option is only meant for `connectionState` subscriptions.
-  //     When `true`, we cancel after a small delay. This ensures the `connectionState`
-  //     listener receives the `disconnected` event.
-  //   - [next] if true, the the stream will be canceled only on the *next* disconnection,
-  //     not the current disconnection. This is useful if you setup your subscriptions
-  //     before you connect.
-  //respeck!.cancelWhenDisconnected(subscription2, delayed: true, next: true);
-
-  // Connect to the device
-  if (respeck == null) {
-    return;
-  }
 
   // Now connect to the respeck
   // enable auto connect
@@ -291,20 +367,23 @@ Future<void> connectToRespeck() async {
 // wait until connection
 //  - when using autoConnect, connect() always returns immediately, so we must
 //    explicity listen to `device.connectionState` to know when connection occurs
-//  await respeck!.connectionState
-//      .where((val) => val == BluetoothConnectionState.connected)
-//      .first;
-
-//  print("CONNECTED to Respeck ${respeck!.remoteId}");
-//  respeckConnected = true;
-//  showToast("Connected to Respeck ${respeck!.remoteId}");
-
-  //await notify();
 }
 
 Future<void> disconnect() async {
-  await respeck!.disconnect();
-  // cancel to prevent duplicate listeners
-  await subscription2.cancel();
+  // Close the recording cleanly first, so that buffered samples reach the file
+  final IOSink? sink = csvSink;
+  csvSink = null;
+  try {
+    await sink?.flush();
+    await sink?.close();
+  } catch (e) {
+    print("Error closing CSV file: $e");
+  }
   csvFile = null;
+
+  await respeck?.disconnect();
+  // cancel to prevent duplicate listeners
+  await subscription2?.cancel();
+  subscription2 = null;
+  respeckConnected = false;
 }

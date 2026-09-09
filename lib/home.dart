@@ -62,6 +62,10 @@ class MyHomePageState extends State<MyHomePage> {
   bool recording = false;
   bool received_packet = false;
 
+  // Set while a connection attempt is in flight, so that repeatedly pressing
+  // Connect cannot set up a second set of BLE listeners
+  bool connecting = false;
+
   int recorded_samples = 0;
   DateTime? start_timestamp;
 
@@ -79,9 +83,6 @@ class MyHomePageState extends State<MyHomePage> {
     // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         // Here we take the value from the MyHomePage object that was created by
         // the App.build method, and use it to set our appbar title.
@@ -91,32 +92,11 @@ class MyHomePageState extends State<MyHomePage> {
         // Center is a layout widget. It takes a single child and positions it
         // in the middle of the parent.
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
           mainAxisAlignment: MainAxisAlignment.start,
           children: <Widget>[
             const SizedBox(height: 10),
             ElevatedButton(
-                onPressed: () async {
-                  if (respeckUUID == null || respeckUUID == "") {
-                    showToast("Please pair with a Respeck first");
-                    return;
-                  }
-                  await scanForRespeck(this);
-                  await connectToRespeck();
-                  scanForRespeck(this);
-                },
+                onPressed: connect,
                 style:
                     ElevatedButton.styleFrom(backgroundColor: Colors.lightBlue),
                 child: const Text('Connect')),
@@ -191,13 +171,7 @@ class MyHomePageState extends State<MyHomePage> {
             ),
             const SizedBox(height: 10),
             ElevatedButton(
-                onPressed: () {
-                  if (!recording) {
-                    return;
-                  }
-                  recording = false;
-                  showToast("Recording stopped");
-                },
+                onPressed: stopRecording,
                 style:
                     ElevatedButton.styleFrom(backgroundColor: Colors.red[200]!),
                 child: const Text('Stop recording')),
@@ -218,6 +192,37 @@ class MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  // Scan for the paired respeck and connect to it
+  void connect() async {
+    if (respeckUUID == null || respeckUUID == "") {
+      showToast("Please pair with a Respeck first");
+      return;
+    }
+    if (connecting) {
+      showToast("Already connecting...");
+      return;
+    }
+    if (respeckConnected) {
+      showToast("Already connected");
+      return;
+    }
+
+    connecting = true;
+    try {
+      await scanForRespeck(this);
+      if (respeck == null) {
+        showLongToast("Respeck $respeckUUID not found - is it awake?");
+        return;
+      }
+      await connectToRespeck();
+    } catch (e) {
+      print("Connect failed: $e");
+      showLongToast("Could not connect to the Respeck");
+    } finally {
+      connecting = false;
+    }
+  }
+
   // Start recording respeck data to CSV
   void record() async {
     if (!received_packet) {
@@ -228,23 +233,94 @@ class MyHomePageState extends State<MyHomePage> {
       showToast("Already recording");
       return;
     }
+    if (storageFolder == null) {
+      showLongToast("No storage folder available - cannot record");
+      return;
+    }
 
     recorded_samples = 0;
     DateTime now =
         DateTime.now().toUtc(); //use current UTC timestamp for filename
     start_timestamp = now;
+    // Note: HH is the 0-23 hour clock. kk is the 1-24 clock, which formats
+    // midnight as hour 24 and so puts the wrong hour in the filename.
     String formattedDate =
-        '${DateFormat('yyyy-MM-dd').format(now)}T${DateFormat('kkmmss').format(now)}Z';
-    filename =
+        '${DateFormat('yyyy-MM-dd').format(now)}T${DateFormat('HHmmss').format(now)}Z';
+    String newFilename =
         'PDIoT_${subjectID}_${sentenceToCamelCase(selected_activity)}_${sentenceToCamelCase(selected_signal)}_${formattedDate}_${respeckUUID?.replaceAll(":", "")}.csv';
-    print(filename);
+    print(newFilename);
+
+    // Close any sink left open by a previous recording that did not shut down
+    // cleanly, so that files cannot be left half written
+    final IOSink? stale = csvSink;
+    csvSink = null;
+    if (stale != null) {
+      try {
+        await stale.flush();
+        await stale.close();
+      } catch (e) {
+        print("Error closing previous CSV file: $e");
+      }
+    }
 
     // create file and write CSV header row
-    csvFile = File('${storageFolder?.path}/$filename');
-    await csvFile?.writeAsString(
-        "receivedPhoneTimestamp,respeckTimestamp,packetSeqNum,sampleSeqNum,accelX,accelY,accelY\n",
-        flush: true);
+    try {
+      csvFile = File('${storageFolder!.path}/$newFilename');
+      final IOSink sink = csvFile!.openWrite(mode: FileMode.writeOnly);
+      // openWrite is lazy, so a bad path or a full disk surfaces on done
+      // rather than being thrown here. Without this handler that would become
+      // an unhandled async error.
+      sink.done.catchError((e) {
+        print("Error writing $newFilename: $e");
+        showLongToast("Error writing the recording file");
+      });
+      csvSink = sink;
+      sink.write(
+          "receivedPhoneTimestamp,respeckTimestamp,packetSeqNum,sampleSeqNum,accelX,accelY,accelZ\n");
+    } catch (e) {
+      print("Could not open $newFilename for writing: $e");
+      showLongToast("Could not create the recording file");
+      csvSink = null;
+      csvFile = null;
+      return;
+    }
+
     showToast("Recording started..");
-    recording = true;
+    if (!mounted) return;
+    setState(() {
+      filename = newFilename;
+      recording_info = "Written 0 samples (0 seconds)";
+      recording = true;
+    });
+  }
+
+  // Stop recording and close the CSV file
+  void stopRecording() async {
+    if (!recording) {
+      return;
+    }
+
+    // Clear the sink before closing it, so that a packet arriving during the
+    // close cannot write to a half closed file
+    final IOSink? sink = csvSink;
+    csvSink = null;
+
+    if (mounted) {
+      setState(() {
+        recording = false;
+        recording_info = "Not recording";
+      });
+    } else {
+      recording = false;
+    }
+
+    try {
+      await sink?.flush();
+      await sink?.close();
+    } catch (e) {
+      print("Error closing CSV file: $e");
+    }
+
+    showToast("Recording stopped");
   }
 }

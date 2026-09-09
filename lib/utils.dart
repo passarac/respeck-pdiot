@@ -2,7 +2,15 @@ import 'package:fluttertoast/fluttertoast.dart';
 import 'package:flutter/material.dart';
 
 String sentenceToCamelCase(String sentence) {
-  List<String> words = sentence.split(' ');
+  // Split on runs of whitespace and drop empty words, so that leading,
+  // trailing or repeated spaces cannot produce an empty word below
+  List<String> words =
+      sentence.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+
+  if (words.isEmpty) {
+    return "";
+  }
+
   String camelCase = words[0].toLowerCase(); // Keep the first word in lowercase
 
   for (int i = 1; i < words.length; i++) {
@@ -36,7 +44,9 @@ void showLongToast(String s) {
 }
 
 // The respeck sends acceleration values as two bytes, which need to be combined
-// into a signed integer, and then scaled to report the acceleration in g
+// into a signed integer, and then scaled to report the acceleration in g.
+// `upper` must be read as a signed byte (getInt8) so that the sign of the
+// 16 bit value is preserved by the shift below.
 double combineAccelBytes(int upper, int lower) {
   int lower2 = lower & 0xFF;
   int value = (upper << 8) | lower2;
