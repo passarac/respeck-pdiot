@@ -226,6 +226,37 @@ class MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  // Apply the values decoded from one packet to the display. setState is
+  // protected, so the BLE code asks the State to update itself through this
+  // method rather than reaching in and calling setState on it from outside.
+  // `accelText` is null for a packet that carried no samples, which leaves the
+  // last reading on screen instead of blanking it.
+  void updateFromPacket({
+    required String? accelText,
+    required String battText,
+    required bool isRecording,
+    required DateTime packetReceivedTs,
+  }) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      if (accelText != null) {
+        accel = accelText;
+      }
+      batt_level = battText;
+
+      // update elapsed time counter if recording
+      if (isRecording && start_timestamp != null) {
+        int elapsed_secs =
+            packetReceivedTs.difference(start_timestamp!).inSeconds;
+
+        recording_info =
+            "Written $recorded_samples samples ($elapsed_secs seconds)";
+      }
+    });
+  }
+
   // Start recording respeck data to CSV
   void record() async {
     if (!received_packet) {

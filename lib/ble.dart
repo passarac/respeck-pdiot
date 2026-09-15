@@ -266,36 +266,27 @@ Future<void> notify() async {
       // Update the UI to show the latest data. This is done once per packet:
       // calling setState for every sample rebuilt the whole page ~25 times
       // per packet for no benefit.
-      if (!ui.mounted) {
-        return;
+      String? accelText;
+      if (seqNumInPacket > 0) {
+        accelText =
+            "x=${x.toStringAsFixed(3)}, y=${y.toStringAsFixed(3)}, z=${z.toStringAsFixed(3)}";
       }
-      ui.setState(() {
-        // This call to setState tells the Flutter framework that something has
-        // changed in this State, which causes it to rerun the build method
-        // so that the display can reflect the updated values.
-        if (seqNumInPacket > 0) {
-          ui.accel =
-              "x=${x.toStringAsFixed(3)}, y=${y.toStringAsFixed(3)}, z=${z.toStringAsFixed(3)}";
-        }
-        if (respeckVersion == 6) {
-          if (charging) {
-            ui.batt_level = "Battery: $battLevel% (charging)";
-          } else {
-            ui.batt_level = "Battery: $battLevel%";
-          }
+
+      String battText = "";
+      if (respeckVersion == 6) {
+        if (charging) {
+          battText = "Battery: $battLevel% (charging)";
         } else {
-          ui.batt_level = "";
+          battText = "Battery: $battLevel%";
         }
+      }
 
-        // update elapsed time counter if recording
-        if (isRecording && ui.start_timestamp != null) {
-          int elapsed_secs =
-              packet_received_ts.difference(ui.start_timestamp!).inSeconds;
-
-          ui.recording_info =
-              "Written ${ui.recorded_samples} samples (${elapsed_secs} seconds)";
-        }
-      });
+      ui.updateFromPacket(
+        accelText: accelText,
+        battText: battText,
+        isRecording: isRecording,
+        packetReceivedTs: packet_received_ts,
+      );
     });
 
     // cleanup: cancel subscription when disconnected
