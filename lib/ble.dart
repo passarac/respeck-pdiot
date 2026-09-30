@@ -91,6 +91,44 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
                 }
               }
             }
+          } else if (Platform.isMacOS) {
+            // macOS uses CoreBluetooth, so its device ID is not the Respeck's
+            // Bluetooth MAC address. The Respeck MAC is carried in the same
+            // FEED service data used by iOS.
+            final serviceData = r.advertisementData.serviceData;
+            final feedUuid = Guid('0000feed-0000-1000-8000-00805f9b34fb');
+            final bytes = serviceData[feedUuid];
+            final advertisedId = bytes == null
+                ? null
+                : bytes
+                    .map((b) => b.toRadixString(16).padLeft(2, '0'))
+                    .join(':')
+                    .toUpperCase();
+
+            print(
+                'macOS BLE advertisement: id=${r.device.remoteId}, name=${r.advertisementData.advName}, feedId=$advertisedId');
+
+            if (advertisedId == respeckUUID?.toUpperCase()) {
+              switch (r.advertisementData.advName) {
+                case "Res6AL":
+                  respeck = r.device;
+                  respeckVersion = 6;
+                  fwString = "6AL";
+                  break;
+                case "Res6AM":
+                  respeck = r.device;
+                  respeckVersion = 6;
+                  fwString = "6AM";
+                  break;
+                case "ResV5i":
+                  respeck = r.device;
+                  respeckVersion = 5;
+                  fwString = "5i";
+                  break;
+                default:
+                  showSnackBar(ui.context, "Respeck firmware is too old");
+              }
+            }
           }
 
           // Stop scanning only once our respeck has actually been found.

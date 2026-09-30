@@ -25,6 +25,8 @@ void showSnackBar(
   String message, {
   Duration duration = const Duration(seconds: 2),
 }) {
+
+  print("SnackBar:$message");
   if (!context.mounted) return;
 
   ScaffoldMessenger.of(context).showSnackBar(
