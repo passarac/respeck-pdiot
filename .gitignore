@@ -50,7 +50,5 @@ Packages/
 Xcode.docc/
 .derivedData/
 
-# ios folder (re-generated in CI)
-ios/
 # Build guides (kept locally, not in the repo)
 docs/
