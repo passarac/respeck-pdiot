@@ -36,7 +36,7 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
   // Note: `onScanResults` clears the results between scans. You should use
   //  `scanResults` if you want the current scan results *or* the results from the previous scan.
 
-  showToast("Searching for Respeck $respeckUUID...");
+  showSnackBar(ui.context, "Searching for Respeck $respeckUUID...");
 
   // Forget any device found by a previous scan, so that a failed scan cannot
   // leave us connecting to a stale device
@@ -63,7 +63,7 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
                 respeckVersion = 5;
                 fwString = "5i";
               } else {
-                showToast("Respeck firmware is too old");
+                showSnackBar(ui.context, "Respeck firmware is too old");
               }
             }
           } else if (Platform.isIOS) {
@@ -87,7 +87,7 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
                 } else {
                   // Only complain about the firmware of *our* respeck, not
                   // about every other BLE device in the room
-                  showToast("Respeck firmware is too old");
+                  showSnackBar(ui.context, "Respeck firmware is too old");
                 }
               }
             }
@@ -300,7 +300,8 @@ Future<void> notify() async {
     await cha.setNotifyValue(true);
   } else {
     print("Acceleration characteristic not found");
-    showLongToast("This Respeck did not offer any acceleration data");
+    showSnackBar(ui.context, "This Respeck did not offer any acceleration data",
+        duration: const Duration(seconds: 4));
   }
 }
 
@@ -323,12 +324,13 @@ Future<void> connectToRespeck() async {
     if (state == BluetoothConnectionState.connected) {
       print("CONNECTED to Respeck $respeckUUID");
       respeckConnected = true;
-      showToast("Connected to Respeck $respeckUUID");
+      showSnackBar(ui.context, "Connected to Respeck $respeckUUID");
       try {
         await notify();
       } catch (e) {
         print("Could not subscribe to acceleration data: $e");
-        showLongToast("Could not read data from the Respeck");
+        showSnackBar(ui.context, "Could not read data from the Respeck",
+            duration: const Duration(seconds: 4));
       }
     }
 
@@ -360,7 +362,9 @@ Future<void> connectToRespeck() async {
       if (!wasRecording &&
           respeck?.disconnectReason?.code != null &&
           respeck?.disconnectReason?.code != 0) {
-        showLongToast("Respeck disconnected - press Connect to reconnect");
+        showSnackBar(
+            ui.context, "Respeck disconnected - press Connect to reconnect",
+            duration: const Duration(seconds: 4));
       }
     }
   });

@@ -1,4 +1,3 @@
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:flutter/material.dart';
 
 String sentenceToCamelCase(String sentence) {
@@ -21,26 +20,21 @@ String sentenceToCamelCase(String sentence) {
   return camelCase;
 }
 
-void showToast(String s) {
-  Fluttertoast.showToast(
-      msg: s,
-      toastLength: Toast.LENGTH_SHORT,
-      gravity: ToastGravity.SNACKBAR,
-      timeInSecForIosWeb: 1,
-      backgroundColor: Colors.blueGrey,
-      textColor: Colors.white,
-      fontSize: 16.0);
-}
+void showSnackBar(
+  BuildContext context,
+  String message, {
+  Duration duration = const Duration(seconds: 2),
+}) {
+  if (!context.mounted) return;
 
-void showLongToast(String s) {
-  Fluttertoast.showToast(
-      msg: s,
-      toastLength: Toast.LENGTH_LONG,
-      gravity: ToastGravity.SNACKBAR,
-      timeInSecForIosWeb: 1,
-      backgroundColor: Colors.blueGrey,
-      textColor: Colors.white,
-      fontSize: 16.0);
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(message),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.all(16),
+      duration: duration,
+    ),
+  );
 }
 
 // The respeck sends acceleration values as two bytes, which need to be combined
