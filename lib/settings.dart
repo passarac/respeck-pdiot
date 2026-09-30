@@ -110,7 +110,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       respeckUUID = newRespeck;
                       subjectID = newSubject;
                     });
-                    showToast("Settings saved");
+                    showSnackBar(context, "Settings saved");
                   },
                   child: const Text('Save settings'),
                 ),
@@ -136,7 +136,7 @@ class _SettingsPageState extends State<SettingsPage> {
     // The scanner returns null if the user backed out without scanning
     // anything, so the result cannot be assigned to the field unchecked
     if (result is! String || result.isEmpty) {
-      showToast("No QR code scanned");
+      showSnackBar(context, "No QR code scanned");
       return;
     }
 

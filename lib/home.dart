@@ -198,15 +198,15 @@ class MyHomePageState extends State<MyHomePage> {
   // Scan for the paired respeck and connect to it
   void connect() async {
     if (respeckUUID == null || respeckUUID == "") {
-      showToast("Please pair with a Respeck first");
+      showSnackBar(context, "Please pair with a Respeck first");
       return;
     }
     if (connecting) {
-      showToast("Already connecting...");
+      showSnackBar(context, "Already connecting...");
       return;
     }
     if (respeckConnected) {
-      showToast("Already connected");
+      showSnackBar(context, "Already connected");
       return;
     }
 
@@ -214,13 +214,15 @@ class MyHomePageState extends State<MyHomePage> {
     try {
       await scanForRespeck(this);
       if (respeck == null) {
-        showLongToast("Respeck $respeckUUID not found - is it awake?");
+        showSnackBar(context, "Respeck $respeckUUID not found - is it awake?",
+            duration: const Duration(seconds: 4));
         return;
       }
       await connectToRespeck();
     } catch (e) {
       print("Connect failed: $e");
-      showLongToast("Could not connect to the Respeck");
+      showSnackBar(context, "Could not connect to the Respeck",
+          duration: const Duration(seconds: 4));
     } finally {
       connecting = false;
     }
@@ -260,15 +262,16 @@ class MyHomePageState extends State<MyHomePage> {
   // Start recording respeck data to CSV
   void record() async {
     if (!received_packet) {
-      showToast("Please connect to a Respeck first");
+      showSnackBar(context, "Please connect to a Respeck first");
       return;
     }
     if (recording) {
-      showToast("Already recording");
+      showSnackBar(context, "Already recording");
       return;
     }
     if (storageFolder == null) {
-      showLongToast("No storage folder available - cannot record");
+      showSnackBar(context, "No storage folder available - cannot record",
+          duration: const Duration(seconds: 4));
       return;
     }
 
@@ -306,20 +309,22 @@ class MyHomePageState extends State<MyHomePage> {
       // an unhandled async error.
       sink.done.catchError((e) {
         print("Error writing $newFilename: $e");
-        showLongToast("Error writing the recording file");
+        showSnackBar(context, "Error writing the recording file",
+            duration: const Duration(seconds: 4));
       });
       csvSink = sink;
       sink.write(
           "receivedPhoneTimestamp,respeckTimestamp,packetSeqNum,sampleSeqNum,accelX,accelY,accelZ\n");
     } catch (e) {
       print("Could not open $newFilename for writing: $e");
-      showLongToast("Could not create the recording file");
+      showSnackBar(context, "Could not create the recording file",
+          duration: const Duration(seconds: 4));
       csvSink = null;
       csvFile = null;
       return;
     }
 
-    showToast("Recording started..");
+    showSnackBar(context, "Recording started..");
     if (!mounted) return;
     setState(() {
       filename = newFilename;
@@ -357,6 +362,6 @@ class MyHomePageState extends State<MyHomePage> {
       print("Error closing CSV file: $e");
     }
 
-    showToast(message);
+    showSnackBar(context, message);
   }
 }

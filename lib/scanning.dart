@@ -41,7 +41,7 @@ class _ScanningPageState extends State<ScanningPage> {
 
               print("QR:$rawValue");
               if (qr_code != rawValue) {
-                showToast(rawValue);
+                showSnackBar(context, rawValue);
                 qr_code = rawValue;
               }
             },
