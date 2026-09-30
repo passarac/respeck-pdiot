@@ -108,7 +108,11 @@ Future<void> scanForRespeck(MyHomePageState _ui) async {
             print(
                 'macOS BLE advertisement: id=${r.device.remoteId}, name=${r.advertisementData.advName}, feedId=$advertisedId');
 
-            if (advertisedId == respeckUUID?.toUpperCase()) {
+            // macOS exposes the device's CoreBluetooth UUID and may report a
+            // different FEED ID than the value stored from the QR code. For
+            // this target, identify the confirmed Res6AM by its advertised
+            // name and retain the FEED ID in the diagnostic log above.
+            if (r.advertisementData.advName == "Res6AM") {
               switch (r.advertisementData.advName) {
                 case "Res6AL":
                   respeck = r.device;
