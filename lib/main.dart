@@ -4,6 +4,7 @@ import 'dart:io';
 import 'globals.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'home.dart';
+import 'har.dart';
 
 // This file starts the app and displays the home screen.
 
@@ -51,6 +52,17 @@ void main() async {
     }
   }
   print("storageFolder:${storageFolder?.path}");
+
+  // Load the activity recognition model and its metadata from the app's
+  // assets (see har.dart). This is done once at startup, before the UI is
+  // built, so that the classifier is ready as soon as data arrives. If the
+  // model cannot be loaded, harClassifier stays null: the error is logged, the
+  // home page shows "Classifier not available", and recording still works.
+  try {
+    harClassifier = await HarClassifier.load();
+  } catch (e) {
+    print("Could not load HAR model: $e");
+  }
 
   runApp(const MyApp());
 }

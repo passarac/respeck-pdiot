@@ -5,12 +5,13 @@ import 'dart:typed_data';
 import 'utils.dart';
 import 'home.dart';
 import 'globals.dart';
+import 'har.dart';
 
 // This file contains the BLE code to scan for and connect to a respeck sensor.
 // Once connected, we notify the acceleration characteristic and decode the
 // stream of packets to obtain x,y,z acceleration in g and battery level.
-// Each sample is written to a CSV file and the UI is updated with the latest
-// values.
+// Each sample is written to a CSV file, fed to the live activity classifier,
+// and the UI is updated with the latest values.
 
 BluetoothDevice? respeck;
 late MyHomePageState ui;
@@ -219,6 +220,9 @@ Future<void> notify() async {
       int seqNumInPacket = 0;
       int samplesWritten = 0;
       double x = 0, y = 0, z = 0;
+      // The newest activity prediction made while decoding this packet, or
+      // null if no sample in this packet completed a classification window
+      HarPrediction? prediction;
 
       // Take a single snapshot of the recording flag, so that a recording
       // started or stopped part way through this packet cannot leave the
@@ -246,6 +250,15 @@ Future<void> notify() async {
               "${packet_received_ts.millisecondsSinceEpoch},$ts,$packetSeqNumber,$seqNumInPacket,$x,$y,$z\n");
           samplesWritten++;
         }
+
+        // Live HAR: pass every sample to the activity classifier, whether or
+        // not we are recording. addSample() returns null for most samples and
+        // a prediction only when a new window has been classified (every 25
+        // samples for the dummy model). `?? prediction` keeps an earlier
+        // prediction from this packet rather than overwriting it with null.
+        // If the model failed to load, harClassifier is null and this line
+        // does nothing.
+        prediction = harClassifier?.addSample(x, y, z) ?? prediction;
 
         seqNumInPacket++;
       }
@@ -286,6 +299,9 @@ Future<void> notify() async {
         battText: battText,
         isRecording: isRecording,
         packetReceivedTs: packet_received_ts,
+        // Only non-null when this packet produced a new prediction, so the
+        // display only changes when there is something new to show
+        prediction: prediction,
       );
     });
 
@@ -339,6 +355,10 @@ Future<void> connectToRespeck() async {
       print(
           "DISCONNECT: ${respeck?.disconnectReason?.code} ${respeck?.disconnectReason?.description}");
       respeckConnected = false;
+      // Empty the classifier's window, so that after a reconnect it waits
+      // for a full window of fresh samples instead of classifying a window
+      // that spans the gap in the data
+      harClassifier?.reset();
       // Require a fresh packet before a new recording can be started
       ui.received_packet = false;
 

@@ -41,6 +41,7 @@ dependencies:
   path_provider: ^2.1.5
   intl: ^0.20.2
   package_info_plus: ^9.0.0
+  tflite_flutter: ^0.12.1
 
 dev_dependencies:
   flutter_test:
@@ -63,6 +64,13 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Live activity recognition model and its metadata (see lib/har.dart).
+  # Files must be listed here to be packaged into the app. To use a different
+  # model, replace these files and update the paths here and in har.dart.
+  assets:
+    - assets/models/har_dummy.tflite
+    - assets/models/har_dummy_meta.json
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -4,6 +4,7 @@ import 'settings.dart';
 import 'utils.dart';
 import 'ble.dart';
 import 'globals.dart';
+import 'har.dart';
 import 'dart:io';
 
 // The home page includes buttons to connect to the respeck, enter capture
@@ -32,6 +33,9 @@ class MyHomePageState extends State<MyHomePage> {
   String accel = "";
   String batt_level = "";
   String recording_info = "Not recording";
+  // Latest live activity prediction, e.g. "normalWalking (87%)". Empty until
+  // the first full window of samples has been classified.
+  String activity = "";
 
   var activities = [
     'Standing',
@@ -88,108 +92,122 @@ class MyHomePageState extends State<MyHomePage> {
         // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: <Widget>[
-            const SizedBox(height: 10),
-            ElevatedButton(
-                onPressed: connect,
-                style:
-                    ElevatedButton.styleFrom(backgroundColor: Colors.lightBlue),
-                child: const Text('Connect')),
-            const SizedBox(height: 10),
-            const Text(
-              'Acceleration (g)',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            Text(
-              accel,
-            ),
-            Text(
-              batt_level,
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Activity',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            DropdownButton(
-              // Initial Value
-              value: selected_activity,
-              items: activities.map((String items) {
-                return DropdownMenuItem(value: items, child: Text(items));
-              }).toList(),
-              // After selecting the desired option,it will
-              // change button value to selected value
-              onChanged: (String? newValue) {
-                setState(() {
-                  selected_activity = newValue!;
-                });
-              },
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Social signal',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            DropdownButton(
-              // Initial Value
-              value: selected_signal,
-              items: social_signals.map((String items) {
-                return DropdownMenuItem(value: items, child: Text(items));
-              }).toList(),
-              // After selecting the desired option,it will
-              // change button value to selected value
-              onChanged: (String? newValue) {
-                setState(() {
-                  selected_signal = newValue!;
-                });
-              },
-            ),
-            const SizedBox(height: 10),
-            ElevatedButton(
-                onPressed: record,
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.lightGreen),
-                child: const Text('Start recording')),
-            const SizedBox(height: 10),
-            const Text(
-              "Recording status",
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            Text(
-              recording_info,
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10.0),
-              child: Text(
-                filename,
+      // Scrollable, so that the controls stay reachable on short screens.
+      // The "Detected activity" lines made the page taller than some screens.
+      body: SingleChildScrollView(
+        child: Center(
+          // Center is a layout widget. It takes a single child and positions it
+          // in the middle of the parent.
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: <Widget>[
+              const SizedBox(height: 10),
+              ElevatedButton(
+                  onPressed: connect,
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.lightBlue),
+                  child: const Text('Connect')),
+              const SizedBox(height: 10),
+              const Text(
+                'Acceleration (g)',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
-            ),
-            const SizedBox(height: 10),
-            ElevatedButton(
-                // Called through a closure because stopRecording now takes an
-                // optional argument, and onPressed wants a plain no-argument
-                // callback
-                onPressed: () => stopRecording(),
-                style:
-                    ElevatedButton.styleFrom(backgroundColor: Colors.red[200]!),
-                child: const Text('Stop recording')),
-            const SizedBox(height: 10),
-            ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (context) => const SettingsPage()),
-                  );
+              Text(
+                accel,
+              ),
+              Text(
+                batt_level,
+              ),
+              const SizedBox(height: 10),
+              // Live activity recognition result. Shows a message instead if
+              // the model could not be loaded at startup.
+              const Text(
+                'Detected activity',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                harClassifier == null ? "Classifier not available" : activity,
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Activity',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              DropdownButton(
+                // Initial Value
+                value: selected_activity,
+                items: activities.map((String items) {
+                  return DropdownMenuItem(value: items, child: Text(items));
+                }).toList(),
+                // After selecting the desired option,it will
+                // change button value to selected value
+                onChanged: (String? newValue) {
+                  setState(() {
+                    selected_activity = newValue!;
+                  });
                 },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.grey),
-                child: const Text('Settings')),
-          ],
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Social signal',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              DropdownButton(
+                // Initial Value
+                value: selected_signal,
+                items: social_signals.map((String items) {
+                  return DropdownMenuItem(value: items, child: Text(items));
+                }).toList(),
+                // After selecting the desired option,it will
+                // change button value to selected value
+                onChanged: (String? newValue) {
+                  setState(() {
+                    selected_signal = newValue!;
+                  });
+                },
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton(
+                  onPressed: record,
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.lightGreen),
+                  child: const Text('Start recording')),
+              const SizedBox(height: 10),
+              const Text(
+                "Recording status",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                recording_info,
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10.0),
+                child: Text(
+                  filename,
+                ),
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton(
+                  // Called through a closure because stopRecording now takes an
+                  // optional argument, and onPressed wants a plain no-argument
+                  // callback
+                  onPressed: () => stopRecording(),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red[200]!),
+                  child: const Text('Stop recording')),
+              const SizedBox(height: 10),
+              ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const SettingsPage()),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.grey),
+                  child: const Text('Settings')),
+            ],
+          ),
         ),
       ),
     );
@@ -230,12 +248,14 @@ class MyHomePageState extends State<MyHomePage> {
   // protected, so the BLE code asks the State to update itself through this
   // method rather than reaching in and calling setState on it from outside.
   // `accelText` is null for a packet that carried no samples, which leaves the
-  // last reading on screen instead of blanking it.
+  // last reading on screen instead of blanking it. Likewise `prediction` is
+  // null unless the packet completed a new classification window.
   void updateFromPacket({
     required String? accelText,
     required String battText,
     required bool isRecording,
     required DateTime packetReceivedTs,
+    HarPrediction? prediction,
   }) {
     if (!mounted) {
       return;
@@ -245,6 +265,12 @@ class MyHomePageState extends State<MyHomePage> {
         accel = accelText;
       }
       batt_level = battText;
+      // Show the predicted activity and the model's confidence in it as a
+      // percentage. Without a new prediction the previous one stays on screen.
+      if (prediction != null) {
+        activity =
+            "${prediction.label} (${(prediction.confidence * 100).toStringAsFixed(0)}%)";
+      }
 
       // update elapsed time counter if recording
       if (isRecording && start_timestamp != null) {
